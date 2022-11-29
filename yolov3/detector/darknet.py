@@ -178,4 +178,4 @@ if __name__ == "__main__":
     darknet.modify_net_info(height=416, width=416)
 
     detections = darknet(x)
-    print("Output shape (batch size, # bbox, # bbox features): ", detections.shape)
+    print("Output shape (batch size, # bbox, # bbox features) - ", detections.shape)
