@@ -166,7 +166,7 @@ if __name__ == "__main__":
 
         # Convert BGR -> RGB, move channel dim to front (C X H X W), add a batch dimension
         img = img[:, :, ::-1].transpose((2, 0, 1))
-        img = img[npnewaxis, :, :, :]
+        img = img[np.newaxis, :, :, :]
 
         # Normalize (0 to 1), convert to torch
         img = torch.tensor(img/255.0, dtype=torch.float32)
