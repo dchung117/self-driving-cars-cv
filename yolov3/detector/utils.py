@@ -131,6 +131,47 @@ def predict_transform(preds: torch.Tensor, input_dim: int, anchors: list[tuple],
 
     return preds
 
+def get_detections(preds: torch.Tensor, confidence: float, nms_conf: float = 0.4):
+    # Apply confidence threshold to preds
+    conf_mask = (preds[:, :, 4] > confidence).float().unsqueeze(2)
+    preds = preds*conf_mask
+
+    # Convert center coordinates and bbox height/width to boundary coordinates
+    box_bounds = preds[:, :, :4].clone().detach()
+    box_bounds[:, :, 0] = (preds[:, :, 0] - preds[:, :, 2]/2) # left
+    box_bounds[:, :, 1] = (preds[:, :, 1] - preds[:, :, 3]/2) # bottom
+    box_bounds[:, :, 0] = (preds[:, :, 0] + preds[:, :, 2]/2) # right
+    box_bounds[:, :, 1] = (preds[:, :, 1] + preds[:, :, 2]/2) # top
+    preds[:, :, :4] = box_bounds
+
+    # Non-maximum suppresion for each image in batch
+    write = 0
+    b_sz = preds.shape[0]
+
+    for idx in range(b_sz):
+        img_preds = preds[idx]
+
+        # Get maximum object detection
+        max_conf, max_conf_idxs = torch.max(img_preds[:, 5:], dim=1)
+        max_conf, max_conf_idxs = max_conf.float().unsqueeze(dim=1), max_conf_idxs.float().unsqueeze(dim=1)
+        seq = (img_preds[:, :5], max_conf, max_conf_idxs) # bbox bounds, confidence, and idxs
+        img_preds = torch.cat(seq, dim=1)
+
+        # Remove bounding boxes with low confidence
+        nonzero_idxs = torch.nonzero(img_preds[:, 4]).squeeze()
+        if nonzero_idxs.numel() > 0:
+            img_preds = img_preds[nonzero_idxs]
+
+        # Get the object predictions
+        img_classes = get_unique_classes(img_preds[:, -1])
+
+        # Perform class-wise non-maximum suppression, IoU
+
+def get_unique_classes(class_idxs: torch.Tensor) -> torch.Tensor:
+    # Get unique class idxs
+    unique_classes = torch.from_numpy(np.unique(class_idxs.cpu().detach().numpy()))
+    
+    return unique_classes.clone().detach()
 def _create_conv_block(block: nn.Sequential, block_dict: dict, idx: int, in_filters: int) -> tuple[nn.Sequential, int]:
     """
     Create 2d convolutional block from block_dict. Uses kernel size, stride length, padding, and/or batch normalization, activation function.

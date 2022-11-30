@@ -6,7 +6,7 @@ import cv2
 import torch
 import torch.nn as nn
 
-from utils import parse_cfg, create_blocks, predict_transform
+from utils import parse_cfg, create_blocks, predict_transform, get_detections
 
 class Darknet(nn.Module):
     def __init__(self, cfg_file: Path, device: Optional[torch.device] = None) -> None:
@@ -177,5 +177,8 @@ if __name__ == "__main__":
     # Modify net_info
     darknet.modify_net_info(height=416, width=416)
 
-    detections = darknet(x)
-    print("Output shape (batch size, # bbox, # bbox features) - ", detections.shape)
+    preds = darknet(x)
+    print("Output shape (batch size, # bbox, # bbox features) - ", preds.shape)
+
+    # Get detections
+    get_detections(preds, 0.5)
