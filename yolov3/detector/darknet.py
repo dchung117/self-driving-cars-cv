@@ -181,4 +181,5 @@ if __name__ == "__main__":
     print("Output shape (batch size, # bbox, # bbox features) - ", preds.shape)
 
     # Get detections
-    get_detections(preds, 0.5)
+    detections = get_detections(preds, 0.5)
+    print("Number of unique detections in image: ", detections.shape[0])

@@ -131,8 +131,11 @@ def predict_transform(preds: torch.Tensor, input_dim: int, anchors: list[tuple],
 
     return preds
 
-def get_detections(preds: torch.Tensor, confidence: float, nms_conf: float = 0.4):
-    # Apply confidence threshold to preds
+def get_detections(preds: torch.Tensor, confidence: float, nms_conf: float = 0.4) -> Optional[torch.Tensor]:
+    # Initialize output
+    output = None
+
+    # Mask out bounding boxes below confidence threshold
     conf_mask = (preds[:, :, 4] > confidence).float().unsqueeze(2)
     preds = preds*conf_mask
 
@@ -144,20 +147,17 @@ def get_detections(preds: torch.Tensor, confidence: float, nms_conf: float = 0.4
     box_bounds[:, :, 1] = (preds[:, :, 1] + preds[:, :, 2]/2) # top
     preds[:, :, :4] = box_bounds
 
-    # Non-maximum suppresion for each image in batch
-    write = 0
     b_sz = preds.shape[0]
-
     for idx in range(b_sz):
         img_preds = preds[idx]
 
-        # Get maximum object detection
+        # Detect all objects in image
         max_conf, max_conf_idxs = torch.max(img_preds[:, 5:], dim=1)
         max_conf, max_conf_idxs = max_conf.float().unsqueeze(dim=1), max_conf_idxs.float().unsqueeze(dim=1)
-        seq = (img_preds[:, :5], max_conf, max_conf_idxs) # bbox bounds, confidence, and idxs
+        seq = (img_preds[:, :5], max_conf, max_conf_idxs) # 7 features per box -> bbox bounds (4x), object confidence, confidence score, and idxs
         img_preds = torch.cat(seq, dim=1)
 
-        # Remove bounding boxes with low confidence
+        # Remove bounding boxes below confidence threshold
         nonzero_idxs = torch.nonzero(img_preds[:, 4]).squeeze()
         if nonzero_idxs.numel() > 0:
             img_preds = img_preds[nonzero_idxs]
@@ -165,13 +165,71 @@ def get_detections(preds: torch.Tensor, confidence: float, nms_conf: float = 0.4
         # Get the object predictions
         img_classes = get_unique_classes(img_preds[:, -1])
 
-        # Perform class-wise non-maximum suppression, IoU
+        # Perform class-wise non-maximum suppression (NMS), IoU
+        for cls in img_classes:
+            # Get detections for class
+            cls_mask = img_preds*((img_preds[:, -1] == cls).float().unsqueeze(dim=1))
+            cls_mask = torch.nonzero(cls_mask[:, -1]).squeeze()
+            img_preds_cls = img_preds[cls_mask]
+
+            # Sort bounding boxes for class from highest to lowest
+            conf_sort_idxs = img_preds_cls[:, 4].sort(descending=True)[1]
+            img_preds_cls = img_preds_cls[conf_sort_idxs]
+
+            # NMS -> drops identical detections of same object class via IoU (i.e. if two boxes detect same tree, remove the one w/ lower object confidence)
+            j = 0
+            while (img_preds_cls.shape[0] > 1) and (j < img_preds_cls.shape[0] - 1):
+                # Get current bbox, remaining bboxs
+                curr_bbox = img_preds_cls[j].unsqueeze(dim=0)
+                rem_bboxs = img_preds_cls[j+1:]
+
+                # Compute IoUs
+                ious = get_bbox_iou(curr_bbox, rem_bboxs)
+
+                # Remove bboxes w/ IoU < nms_conf
+                low_nms_mask = (ious < nms_conf).float().unsqueeze(1)
+                img_preds_cls[j+1:] *= low_nms_mask
+                high_nms_idxs = torch.nonzero(img_preds_cls[:, 4]).squeeze()
+                img_preds_cls = img_preds_cls[high_nms_idxs]
+
+                j += 1
+
+            # Write detections of class to output
+            batch_idxs = img_preds_cls.new_full((img_preds_cls.shape[0], 1), fill_value=idx) # get each unique bbox with low NMS
+            seq = torch.cat((batch_idxs, img_preds_cls), dim=1)
+
+            if output is None:
+                output = seq
+            else:
+                output = torch.cat((output, seq), dim=0)
+
+    return output
+
+def get_bbox_iou(curr_bbox: torch.Tensor, rem_bboxs: torch.Tensor) -> torch.Tensor:
+    # Get left, bottom, right, top bounds
+    cb_x1, cb_y1, cb_x2, cb_y2 = curr_bbox[:, 0], curr_bbox[:, 1], curr_bbox[:, 2], curr_bbox[:, 3]
+    rb_x1, rb_y1, rb_x2, rb_y2 = rem_bboxs[:, 0], rem_bboxs[: ,1], rem_bboxs[:, 2], rem_bboxs[:, 3]
+
+    # Get intersection region between curr_bbox and all rem_bboxs
+    inter_x1 = torch.max(cb_x1, rb_x1) # inter left
+    inter_y1 = torch.max(cb_y1, rb_y1) # inter bottom
+    inter_x2 = torch.min(cb_x2, rb_x2) # inter right
+    inter_y2 = torch.min(cb_y2, rb_y2) # inter top
+    inter_area = torch.clamp(inter_x2 - inter_x1 + 1, min=0)*torch.clamp(inter_y2 - inter_y1 + 1, min=0)
+
+    # Get union regions
+    cb_area = (cb_x2 - cb_x1 + 1)*(cb_y2 - cb_y1 + 1)
+    rb_area = (rb_x2 - rb_x1 + 1)*(rb_y2 - rb_y1 + 1)
+
+    # IoU
+    return inter_area / (cb_area + rb_area - inter_area)
 
 def get_unique_classes(class_idxs: torch.Tensor) -> torch.Tensor:
     # Get unique class idxs
     unique_classes = torch.from_numpy(np.unique(class_idxs.cpu().detach().numpy()))
     
     return unique_classes.clone().detach()
+
 def _create_conv_block(block: nn.Sequential, block_dict: dict, idx: int, in_filters: int) -> tuple[nn.Sequential, int]:
     """
     Create 2d convolutional block from block_dict. Uses kernel size, stride length, padding, and/or batch normalization, activation function.
