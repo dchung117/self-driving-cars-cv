@@ -4,3 +4,9 @@
 wget https://repo.anaconda.com/archive/Anaconda3-2022.10-Linux-x86_64.sh
 bash Anaconda3-2022.10-Linux-x86_64.sh
 rm Anaconda3-2022.10-Linux-x86_64.sh
+
+# Get weights
+bash get_weights.sh
+
+# Get COCO names
+bash get_coco.sh
