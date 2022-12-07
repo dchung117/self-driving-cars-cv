@@ -62,9 +62,10 @@ if __name__ == "__main__":
 
     # initialize yolov3
     print("Initializing YOLOv3...")
-    model = Darknet(args.cfg_file)
+    model = Darknet(args.cfg_file, device=device)
     model.modify_net_info(batch=b_sz, width=args.res, height=args.res)
     model.load_weights(args.wts_file)
+    print(model.device)
 
     assert model.net_info["height"] % 32 == 0, "Resolution must be multiple of 32."
     assert model.net_info["height"] > 32, "Resolution must be greater than 32."
@@ -83,12 +84,57 @@ if __name__ == "__main__":
     imgs = [cv2.imread(str(img_file)) for img_file in img_list]
 
     # prep images
-    prepped_imgs = list(map(prep_image, imgs, [args.res for _ in range(len(imgs))]))
+    prepped_imgs = list(map(prep_image, imgs, [args.res for _ in range(len(imgs))], [device for _ in range(len(imgs))]))
     img_dims = torch.tensor([(img.shape[1], img.shape[0]) for img in imgs], dtype=torch.float32).repeat(1, 2)
 
     # create batches
     leftover = len(imgs) % b_sz > 0
     if b_sz > 1:
         n_batches = (len(imgs) % b_sz) + int(leftover)
-        prepped_imgs = [torch.cat(torch[i*b_sz:min((i+1)*b_sz, len(prepped_imgs))], dim=0) for i in range(n_batches)]
-    
+        prepped_imgs = [torch.cat(torch[i*b_sz:min((i+1)*b_sz, len(prepped_imgs))], dim=0).to(device) for i in range(n_batches)]
+
+    # Get detections on each batch
+    output = None
+    start_detect_loop = time.time()
+    for i, batch in enumerate(prepped_imgs):
+        # Load the image
+        pred_start = time.time()
+
+        # Get model preds
+        with torch.inference_mode():
+            preds = model(batch).cpu()
+        
+        # Interpret detections from preds
+        preds = get_detections(preds, args.obj_conf, nms_conf=args.nms_conf)
+        pred_end = time.time()
+        pred_time = (pred_end - pred_start)/b_sz
+
+        # Print predictions for each batch image
+        if isinstance(preds, torch.Tensor):
+            for b_idx, image in enumerate(img_list[i*b_sz:min((i+1)*b_sz, len(img_list))]):
+                print(f"Image: {str(image).split('/')[-1]}")
+                print(f"Prediction time (sec): {pred_time:6.3f}")
+
+                # Get object names
+                objs = [names[int(x[-1])] for x in preds if int(x[0]) == b_idx]
+                print(f"Objects detected: {', '.join(objs)}")
+                print()
+            
+            # Convert b_idxs to img_idxs
+            preds[:, 0] += i*b_sz
+
+            # Concatenate
+            if output !=  None:
+                output = torch.cat((output, preds), dim=0)
+            else:
+                output = preds
+
+        else:
+            for b_idx, image in enumerate(img_list[i*b_sz:min((i+1)*b_sz, len(img_list))]):
+                print(f"Image: {str(image).split('/')[-1]}")
+                print(f"Prediction time (sec): {pred_time:6.3f}")
+                print("No objects detected.")
+
+        # Synchronize CUDA w/ CPU
+        if str(device) == "cuda":
+            torch.cuda.synchronize()
