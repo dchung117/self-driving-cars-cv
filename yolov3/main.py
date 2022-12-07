@@ -137,4 +137,5 @@ if __name__ == "__main__":
 
         # Synchronize CUDA w/ CPU
         if str(device) == "cuda":
+            print("Synchronized")
             torch.cuda.synchronize()
