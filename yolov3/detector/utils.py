@@ -1,10 +1,8 @@
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import cv2
 import torch
-import torch.nn as nn
 
 def predict_transform(preds: torch.Tensor, input_dim: int, anchors: list[tuple], n_classes: int, device: Optional[torch.device] = None) -> torch.Tensor:
     # Get batch size, stride, grid size, bbox_attributes num_anchors
@@ -169,7 +167,7 @@ def resize_image(img: np.ndarray, res: int) -> np.ndarray:
 
     return canvas
 
-def prep_image(img: np.ndarray, res: int) -> np.ndarray:
+def prep_image(img: np.ndarray, res: int, device: torch.device) -> np.ndarray:
     """
     Takes a resized image and prepares input to YOLOv3.
     """
@@ -182,4 +180,4 @@ def prep_image(img: np.ndarray, res: int) -> np.ndarray:
     # Convert to tensor
     new_img = torch.from_numpy(new_img).float().unsqueeze(dim=0)/255.0
 
-    return new_img
+    return new_img.to(device)

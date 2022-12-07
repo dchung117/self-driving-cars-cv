@@ -100,7 +100,7 @@ class Darknet(nn.Module):
 
             # Each module forward pass
             if (module_type == "convolutional") or (module_type == "upsample"):
-                x = self.module_list[idx](x.to(self.device)).cpu()
+                x = self.module_list[idx](x.to(self.device))
             elif module_type == "route":
                 # Get layers to route skip connections
                 layers = module["layers"]

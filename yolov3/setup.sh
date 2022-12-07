@@ -10,3 +10,7 @@ bash get_weights.sh
 
 # Get COCO names
 bash get_coco.sh
+
+# Set up git
+git config --global user.name "dchung117"
+git config --global user.email "dchung0330@gmail.com"
