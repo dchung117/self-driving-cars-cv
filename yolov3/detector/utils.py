@@ -154,7 +154,7 @@ def resize_image(img: np.ndarray, res: int) -> np.ndarray:
     Resize OpenCV image to preserve original aspect ratio, overlay on greyscale canvas of desired resolution.
     """
     # Get new width/height, keep aspect ratio constant
-    w, h = img.shape[1], img.shape[2]
+    w, h = img.shape[1], img.shape[0]
     scale = min(res/w, res/h)
     new_w, new_h = int(w * scale), int(h * scale)
     new_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
@@ -181,3 +181,31 @@ def prep_image(img: np.ndarray, res: int, device: torch.device) -> np.ndarray:
     new_img = torch.from_numpy(new_img).float().unsqueeze(dim=0)/255.0
 
     return new_img.to(device)
+
+def draw_bbox(bbox: torch.Tensor, imgs: list[np.ndarray], colors: list[tuple[int, int, int]], classes: list[str]) -> np.ndarray:
+    # Convert bbox edges to integers
+    top_left = tuple([int(x) for x in bbox[1:3]])
+    bottom_right = tuple([int(x) for x in bbox[3:5]])
+
+    # Get original image from imgs
+    orig_img = imgs[int(bbox[0])]
+
+    # Get class label
+    lbl_idx = int(bbox[-1])
+    label= classes[lbl_idx]
+
+    # Draw rectangle on original image
+    cv2.rectangle(orig_img, top_left, bottom_right, colors[lbl_idx], 1)
+
+    # Draw class label
+    lbl_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 1, 1)[0]
+
+    # Draw outer filled rectangle for class label
+    bottom_right = top_left[0] + lbl_size[0] + 3, top_left[1] + lbl_size[1] + 4
+    cv2.rectangle(orig_img, top_left, bottom_right, colors[lbl_idx], -1)
+
+    # Write label
+    cv2.putText(orig_img, label, (top_left[0], top_left[1] + lbl_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 1, [255, 255, 255])
+
+    return orig_img
+

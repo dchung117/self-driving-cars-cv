@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 
 from detector.darknet import Darknet
-from detector.utils import predict_transform, get_detections, resize_image, prep_image
+from detector.utils import predict_transform, get_detections, resize_image, prep_image, draw_bbox
 
 def parse_args() -> argparse.Namespace:
     """
@@ -60,9 +60,14 @@ if __name__ == "__main__":
     name_file = Path("data/coco.names")
     names = load_classes(name_file)
 
+    # load colors
+    with open("data/pallete", "rb") as f:
+        colors = pickle.load(f)
+
     # initialize yolov3
     print("Initializing YOLOv3...")
     model = Darknet(args.cfg_file, device=device)
+    input_res = int(model.net_info["height"])
     model.modify_net_info(batch=b_sz, width=args.res, height=args.res)
     model.load_weights(args.wts_file)
     print(model.device)
@@ -139,3 +144,28 @@ if __name__ == "__main__":
         if str(device) == "cuda":
             print("Synchronized")
             torch.cuda.synchronize()
+
+    # Draw bounding boxes
+    if output is None:
+        print("No objects detected.")
+        exit()
+
+    # get image with detections
+    img_dims = torch.index_select(img_dims, dim=0, index=output[:, 0].long())
+
+    # re-scale bbox edges to original image dimension
+    scale = torch.min(args.res/img_dims, 1)[0].view(-1, 1)
+    output[:, 1:5] /= scale
+
+    # clip bounding boxes to original image dimensions
+    for i in range(output.shape[0]):
+        output[i, [1, 3]] = torch.clamp(output[i, [1, 3]], 0.0, img_dims[i, 0]) # left/right
+        output[i, [2, 4]] = torch.clamp(output[i, [2, 4]], 0.0, img_dims[i, 1]) # top/bottom
+
+    # draw bounding boxes on images
+    imgs = list(map(lambda x: draw_bbox(x, imgs, colors, names), output))
+
+    # Save the images w/ bounding boxes drawn
+    for img, img_path in zip(imgs, img_list):
+        cv2.imwrite(f"{args.detect}/detect_{str(img_path).rsplit('/', 1)[-1]}", img)
+    end = time.time()
